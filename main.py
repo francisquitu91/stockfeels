@@ -2,6 +2,8 @@
 from urllib.request import urlopen, Request
 #importing web scrapers
 from bs4 import BeautifulSoup
+import nltk
+nltk.downloader.download('vader_lexicon')
 from nltk.sentiment.vader import SentimentIntensityAnalyzer
 #allows us to manipulate data in table structure
 import pandas as pd
