@@ -10,6 +10,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import pickle
 import streamlit as st
+from datetime import date as date2
 
 def sentimentAnalysis(tickers):
     finviz_url = 'https://finviz.com/quote.ashx?t='
@@ -62,19 +63,27 @@ def sentimentAnalysis(tickers):
     f = lambda title: vader.polarity_scores(title)['compound']
     #make a new column and call it compound to access the grade
     df['compound'] = df['title'].apply(f)
+    # print(df.head(20))
     #takes date column and converts string to date time format (easy for matplot lib to recognize)
+    df.loc[df['date'] == "Today", 'date'] = date2.today()
     df['date'] = pd.to_datetime(df.date).dt.date
 
     plt.figure(figsize=(20,16))
 
     #mean function only looks for integer values in a row and averages em up, group by ticker, date isolates those columns
-    mean_df = df.groupby(['ticker', 'date']).mean()
-    #returns datafram with new level of column labels who's inner most level consists of pivoted index labels
-    mean_df = mean_df.unstack()
-    #cross section
-    mean_df = mean_df.xs('compound', axis="columns").transpose()
-    mean_df.plot(kind='bar')
+    # print(df.head())
+    mean_df = df.groupby(['ticker', 'date'])['compound'].mean().reset_index()
+    
+    # Pivot table for plotting
+    mean_df_pivot = mean_df.pivot(index='date', columns='ticker', values='compound')
+
+    mean_df_pivot.plot(kind='bar')
+    plt.title('Average Sentiment Compound Score')
+    plt.xlabel('Date')
+    plt.ylabel('Average Compound Score')
+    plt.legend(title='Ticker')
     st.pyplot(plt)
+    st.write(df)
     return df
 
 def show_page():
