@@ -43,9 +43,11 @@ def sentimentAnalysis(tickers):
                 title = row.a.text
                 #date is in the <td> section
                 date_data = row.td.text.replace("\r\n", "").split(' ')
+                # print(date_data)
+                # print(len(date_data))
 
                 #split dates off of spaces
-                if len(date_data) == 1:
+                if len(date_data) == 21:
                     time = date_data[12]
                 else:
                     date = date_data[12]
