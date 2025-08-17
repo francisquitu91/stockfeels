@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "description": "Streamlit-based sentiment analysis application",
   "scripts": {
-    "dev": "python3 -m streamlit run new_main.py --server.port 8501",
-    "build": "echo 'Python Streamlit app - no build step required'",
-    "start": "python3 -m streamlit run new_main.py --server.port 8501"
+    "build": "echo 'Build completed'",
+    "dev": "node server.js",
+    "start": "node server.js"
   },
   "dependencies": {},
   "devDependencies": {}
