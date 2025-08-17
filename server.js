@@ -10,8 +10,46 @@ const PORT = process.env.PORT || 8501;
 app.use(express.static('public'));
 app.use(express.json());
 
+// Function to run Python sentiment analysis
+function runPythonAnalysis(ticker = null) {
+    return new Promise((resolve, reject) => {
+        const args = ticker ? ['api_wrapper.py', 'analyze', ticker] : ['api_wrapper.py', 'analyze'];
+        const pythonProcess = spawn('python3', args);
+        
+        let dataString = '';
+        let errorString = '';
+        
+        pythonProcess.stdout.on('data', (data) => {
+            dataString += data.toString();
+        });
+        
+        pythonProcess.stderr.on('data', (data) => {
+            errorString += data.toString();
+        });
+        
+        pythonProcess.on('close', (code) => {
+            if (code === 0) {
+                try {
+                    const result = JSON.parse(dataString);
+                    resolve(result);
+                } catch (e) {
+                    reject({ error: 'Failed to parse Python output', details: dataString });
+                }
+            } else {
+                reject({ error: 'Python process failed', code, stderr: errorString });
+            }
+        });
+        
+        // Timeout after 30 seconds
+        setTimeout(() => {
+            pythonProcess.kill();
+            reject({ error: 'Python process timeout' });
+        }, 30000);
+    });
+}
+
 // Basic HTML template for the sentiment analyzer
-const htmlTemplate = `
+const getHtmlTemplate = (sentimentData = null) => `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -87,6 +125,56 @@ const htmlTemplate = `
             color: #6c757d;
             font-size: 0.9em;
         }
+        .sentiment-card {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 15px 0;
+            transition: transform 0.2s ease;
+        }
+        .sentiment-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .bullish { border-left: 4px solid #28a745; }
+        .bearish { border-left: 4px solid #dc3545; }
+        .neutral { border-left: 4px solid #ffc107; }
+        .ticker-symbol {
+            font-size: 1.5em;
+            font-weight: bold;
+            color: #333;
+        }
+        .sentiment-score {
+            font-size: 1.2em;
+            margin: 10px 0;
+        }
+        .score-details {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+            font-size: 0.9em;
+            color: #666;
+        }
+        .refresh-btn {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 1em;
+            margin: 20px 0;
+            transition: background 0.2s ease;
+        }
+        .refresh-btn:hover {
+            background: #0056b3;
+        }
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
     </style>
 </head>
 <body>
@@ -95,42 +183,158 @@ const htmlTemplate = `
             <span class="status-indicator status-running"></span>
         </h1>
         
-        <div class="info-message">
-            <strong><span class="status-indicator status-running"></span>Server Status: Running Successfully</strong><br>
-            The Node.js server is running properly and serving the application interface.
-        </div>
+        ${sentimentData ? generateSentimentHTML(sentimentData) : `
+            <div class="info-message">
+                <strong><span class="status-indicator status-running"></span>Live Sentiment Analysis Available</strong><br>
+                Click "Analyze Stocks" to get real-time sentiment analysis from Finviz news.
+            </div>
+            
+            <button class="refresh-btn" onclick="analyzeSentiment()">📊 Analyze Stocks</button>
+            
+            <div id="loading" class="loading" style="display: none;">
+                <p>🔄 Analyzing sentiment from financial news...</p>
+                <p>This may take a few moments...</p>
+            </div>
+            
+            <div id="sentiment-results"></div>
+        `}
         
         <div class="info-message">
-            <strong>Original Python Application Features:</strong>
+            <strong>✅ Active Features:</strong>
             <ul class="feature-list">
-                <li>📊 Stock sentiment analysis from Finviz news</li>
-                <li>🤖 AI-powered investment chatbot</li>
+                <li>📊 <strong>Live Stock Sentiment Analysis</strong> - Real-time analysis from Finviz news</li>
                 <li>📈 Real-time sentiment scoring for AMZN, TSLA, AAPL, MSFT</li>
-                <li>💡 Investment strategy recommendations</li>
-                <li>📋 Analysis history tracking</li>
-                <li>💳 PayPal integration for premium features</li>
+                <li>🎯 Bullish/Bearish/Neutral classifications</li>
+                <li>📊 Detailed sentiment scores (positive, negative, neutral, compound)</li>
             </ul>
         </div>
         
-        <div class="info-message">
-            <strong>Current Implementation:</strong><br>
-            Running on Node.js Express server due to Python environment limitations in WebContainer. 
-            The original Streamlit application with sentiment analysis and AI features is preserved in the codebase 
-            and can be deployed to environments with proper Python support.
-        </div>
+        <script>
+            async function analyzeSentiment() {
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('sentiment-results').innerHTML = '';
+                
+                try {
+                    const response = await fetch('/api/sentiment');
+                    const data = await response.json();
+                    
+                    document.getElementById('loading').style.display = 'none';
+                    
+                    if (data.success) {
+                        displaySentimentResults(data.data);
+                    } else {
+                        document.getElementById('sentiment-results').innerHTML = 
+                            '<div class="error-message">Error: ' + data.error + '</div>';
+                    }
+                } catch (error) {
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('sentiment-results').innerHTML = 
+                        '<div class="error-message">Network error: ' + error.message + '</div>';
+                }
+            }
+            
+            function displaySentimentResults(data) {
+                let html = '<h2>📊 Current Sentiment Analysis</h2>';
+                
+                for (const [ticker, analysis] of Object.entries(data)) {
+                    const sentimentClass = analysis.sentiment.toLowerCase();
+                    const emoji = analysis.sentiment === 'Bullish' ? '📈' : 
+                                 analysis.sentiment === 'Bearish' ? '📉' : '➡️';
+                    
+                    html += \`
+                        <div class="sentiment-card \${sentimentClass}">
+                            <div class="ticker-symbol">\${ticker} \${emoji}</div>
+                            <div class="sentiment-score">
+                                <strong>\${analysis.sentiment}</strong> 
+                                (Score: \${analysis.compound_score})
+                            </div>
+                            <div class="score-details">
+                                <span>Positive: \${analysis.positive}</span>
+                                <span>Negative: \${analysis.negative}</span>
+                                <span>Neutral: \${analysis.neutral}</span>
+                            </div>
+                        </div>
+                    \`;
+                }
+                
+                html += '<button class="refresh-btn" onclick="analyzeSentiment()">🔄 Refresh Analysis</button>';
+                document.getElementById('sentiment-results').innerHTML = html;
+            }
+        </script>
         
         <div class="footer">
             <p>🚀 Application successfully running on port ${PORT}</p>
-            <p>Built with Express.js • Original Python code preserved</p>
+            <p>Built with Express.js + Python • Live sentiment analysis active</p>
         </div>
     </div>
 </body>
 </html>
 `;
 
+function generateSentimentHTML(sentimentData) {
+    if (!sentimentData.success) {
+        return `<div class="error-message">Error loading sentiment data: ${sentimentData.error}</div>`;
+    }
+    
+    let html = '<h2>📊 Current Sentiment Analysis</h2>';
+    
+    for (const [ticker, analysis] of Object.entries(sentimentData.data)) {
+        const sentimentClass = analysis.sentiment.toLowerCase();
+        const emoji = analysis.sentiment === 'Bullish' ? '📈' : 
+                     analysis.sentiment === 'Bearish' ? '📉' : '➡️';
+        
+        html += `
+            <div class="sentiment-card ${sentimentClass}">
+                <div class="ticker-symbol">${ticker} ${emoji}</div>
+                <div class="sentiment-score">
+                    <strong>${analysis.sentiment}</strong> 
+                    (Score: ${analysis.compound_score})
+                </div>
+                <div class="score-details">
+                    <span>Positive: ${analysis.positive}</span>
+                    <span>Negative: ${analysis.negative}</span>
+                    <span>Neutral: ${analysis.neutral}</span>
+                </div>
+            </div>
+        `;
+    }
+    
+    html += '<button class="refresh-btn" onclick="analyzeSentiment()">🔄 Refresh Analysis</button>';
+    return html;
+}
+
 // Main route
 app.get('/', (req, res) => {
-    res.send(htmlTemplate);
+    res.send(getHtmlTemplate());
+});
+
+// Sentiment analysis API endpoint
+app.get('/api/sentiment', async (req, res) => {
+    try {
+        const result = await runPythonAnalysis();
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.error || 'Unknown error',
+            details: error
+        });
+    }
+});
+
+// Single ticker analysis
+app.get('/api/sentiment/:ticker', async (req, res) => {
+    try {
+        const ticker = req.params.ticker.toUpperCase();
+        const result = await runPythonAnalysis(ticker);
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.error || 'Unknown error',
+            details: error
+        });
+    }
 });
 
 // Health check
@@ -139,23 +343,27 @@ app.get('/health', (req, res) => {
         status: 'Server running successfully', 
         timestamp: new Date().toISOString(),
         port: PORT,
-        environment: 'WebContainer with Node.js fallback'
+        environment: 'WebContainer with Node.js + Python integration',
+        features: ['Live sentiment analysis', 'Real-time stock data', 'Finviz scraping']
     });
 });
 
 // API endpoint to show original Python features
 app.get('/api/features', (req, res) => {
     res.json({
-        originalFeatures: [
-            'Stock sentiment analysis from Finviz',
-            'AI-powered investment chatbot',
+        activeFeatures: [
+            'Live stock sentiment analysis from Finviz',
             'Real-time sentiment scoring',
-            'Investment strategy recommendations',
-            'Analysis history tracking',
-            'PayPal integration'
+            'NLTK VADER sentiment analysis',
+            'Support for AMZN, TSLA, AAPL, MSFT',
+            'Bullish/Bearish/Neutral classification'
         ],
-        currentStatus: 'Node.js server running',
-        pythonCodePreserved: true
+        currentStatus: 'Node.js + Python integration active',
+        endpoints: [
+            'GET /api/sentiment - Analyze all stocks',
+            'GET /api/sentiment/:ticker - Analyze specific stock',
+            'GET /health - Server health check'
+        ]
     });
 });
 
@@ -163,5 +371,6 @@ app.listen(PORT, () => {
     console.log(`✅ Server running successfully on port ${PORT}`);
     console.log(`🌐 Application available at http://localhost:${PORT}`);
     console.log(`📊 Health check: http://localhost:${PORT}/health`);
+    console.log(`📈 Sentiment API: http://localhost:${PORT}/api/sentiment`);
     console.log(`🔧 Features API: http://localhost:${PORT}/api/features`);
 });
