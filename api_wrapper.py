@@ -5,18 +5,45 @@ API wrapper to expose Python sentiment analysis features via HTTP
 import json
 import sys
 import traceback
+import os
 from urllib.request import urlopen, Request
 from bs4 import BeautifulSoup
-import nltk
-from nltk.sentiment.vader import SentimentIntensityAnalyzer
 import pandas as pd
 from datetime import datetime
 
-# Download VADER lexicon if not present
+# Try to import NLTK, fallback if not available
 try:
+    import nltk
+    from nltk.sentiment.vader import SentimentIntensityAnalyzer
     nltk.data.find('vader_lexicon')
 except LookupError:
-    nltk.download('vader_lexicon')
+    try:
+        nltk.download('vader_lexicon')
+    except:
+        pass
+except ImportError:
+    # NLTK not available, we'll use a simple fallback
+    pass
+
+def simple_sentiment_analysis(text):
+    """
+    Simple fallback sentiment analysis if NLTK is not available
+    """
+    positive_words = ['good', 'great', 'excellent', 'positive', 'up', 'rise', 'gain', 'profit', 'bull', 'strong']
+    negative_words = ['bad', 'terrible', 'negative', 'down', 'fall', 'loss', 'bear', 'weak', 'decline', 'drop']
+    
+    text_lower = text.lower()
+    pos_count = sum(1 for word in positive_words if word in text_lower)
+    neg_count = sum(1 for word in negative_words if word in text_lower)
+    
+    if pos_count > neg_count:
+        compound = 0.1 + (pos_count - neg_count) * 0.1
+        return {'compound': min(compound, 1.0), 'pos': 0.3, 'neg': 0.1, 'neu': 0.6}
+    elif neg_count > pos_count:
+        compound = -0.1 - (neg_count - pos_count) * 0.1
+        return {'compound': max(compound, -1.0), 'pos': 0.1, 'neg': 0.3, 'neu': 0.6}
+    else:
+        return {'compound': 0.0, 'pos': 0.2, 'neg': 0.2, 'neu': 0.6}
 
 def get_news_sentiment(tickers=['AMZN', 'TSLA', 'AAPL', 'MSFT']):
     """
@@ -61,9 +88,14 @@ def get_news_sentiment(tickers=['AMZN', 'TSLA', 'AAPL', 'MSFT']):
         columns = ['ticker', 'date', 'time', 'title']
         parsed_news_df = pd.DataFrame(parsed_news, columns=columns)
         
-        # Sentiment analysis
-        vader = SentimentIntensityAnalyzer()
-        scores = parsed_news_df['title'].apply(vader.polarity_scores).tolist()
+        # Sentiment analysis - try NLTK first, fallback to simple analysis
+        try:
+            from nltk.sentiment.vader import SentimentIntensityAnalyzer
+            vader = SentimentIntensityAnalyzer()
+            scores = parsed_news_df['title'].apply(vader.polarity_scores).tolist()
+        except:
+            # Fallback to simple sentiment analysis
+            scores = parsed_news_df['title'].apply(simple_sentiment_analysis).tolist()
         
         scores_df = pd.DataFrame(scores)
         parsed_news_df = parsed_news_df.join(scores_df, rsuffix='_right')
